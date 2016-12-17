@@ -2,6 +2,8 @@ import os
 import re
 import hashlib
 import argparse
+import shutil
+import subprocess as pc
 from tex2png import tex2png
 from imgsize import get_image_size
 
@@ -120,7 +122,53 @@ def process_dollar(line):
     return dollar_re.sub('$', line)
 
 
-def translate(src_md, output_md, github_root, image_folder):
+def remove_ext(name):
+    return os.path.splitext(name)[0]
+
+def bash(cmd):
+    return pc.check_output(cmd.split()).decode('utf-8').strip()
+
+def get_github_info(remote='origin'):
+    try:
+        git_remotes = bash('git remote -v')
+        git_current_branch = bash('git rev-parse --abbrev-ref HEAD')
+    except pc.CalledProcessError as exc:                                                                                                   
+        print('git ERROR!!!\n', 
+              '-'*50, '\n', 
+              exc.output.decode('utf-8'),
+              '-'*50) # exc.returncode
+        raise
+
+    git_remotes = git_remotes.split('\n')
+    for info in git_remotes:
+        # typically looks like:
+        # bakkdoor  https://github.com/bakkdoor/grit (fetch)
+        # bakkdoor  https://github.com/bakkdoor/grit (push)
+        # koke      git://github.com/koke/grit.git (fetch)
+        # koke      git://github.com/koke/grit.git (push)
+        # origin    git@github.com:mojombo/grit.git (fetch)
+        # origin    git@github.com:mojombo/grit.git (push)
+        info = info.strip().split()
+        assert len(info) == 3 and info[-1] in ['(fetch)', '(push)'], \
+            'bad git remote format {}'.format(info)
+        if info[0] == remote:
+            url = info[1]
+            # hardcoded parse
+            if url.startswith('git@'):
+                account, repo = url.split('/')
+                account = account.split(':')[-1]
+            else:
+                # take the last two items
+                *_, account, repo = url.split('/')
+            repo = remove_ext(repo)
+            return (account, repo, git_current_branch)
+    raise Exception('remote {} not found in the current git repo.'.format(remote))
+
+
+def translate(src_md, output_md, remote, image_folder):
+    github_root = '/'.join(get_github_info(remote))
+    print('Detected github root:', github_root)
+    
     output_md = open(output_md, 'w')
     for line in open(src_md):
         # check for images first, replace relative paths that start with `/`
@@ -137,14 +185,19 @@ def translate(src_md, output_md, github_root, image_folder):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('github_root', 
-                        help='<username>/<repo>/<branch>')
     parser.add_argument('src_md', help='Source markdown file')
     parser.add_argument('output_md', help='Output markdown file')
 
     parser.add_argument('-d', '--image-folder', default='',
                         help='Folder for the generated latex images, '
                         'must be RELATIVE PATH with respect to your github dir.')
+    parser.add_argument('-r', '--remote', default='origin',
+                        help='Github remote to push')
 
     args = parser.parse_args()
+    folder = args.image_folder
+    if folder and not os.path.exists(folder):
+        os.mkdir(folder)
+        print('Created new folder for generated latex images: {}'.format(folder))
+    
     translate(**vars(args))
