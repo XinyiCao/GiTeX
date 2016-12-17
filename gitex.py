@@ -42,21 +42,20 @@ def replace_n(s, spans, replacements):
     return new_s + replacements[-1] + s[spans[-1][1]:]
     
     
-def gen_github_link(github_path, alt, height=None):
+def gen_github_link(github_url, alt, width=None, height=None):
     """
-    Generate image markdown code with absolute URL link
+    Generate image markdown code with absolute URL link <deprecated>
     <img src="https://raw.githubusercontent.com/LinxiFan/temp/master/d500.png" 
     height="20" />
-    
     github_path: <username>/<repo>/<branch>/<folders>/<filename>
     """
-    if height:
-        return ('<img src="https://raw.githubusercontent.com/{}" alt="{}" '
-               'height="{}" />'
-               .format(github_path, alt, height))
+    if height or width:
+        width = 'width="{}"'.format(width) if width else ''
+        height = 'height="{}"'.format(height) if height else ''
+        return ('<img src="{}" alt="{}" {} {} />'
+               .format(github_url, alt, width, height))
     else:
-        return ('![{}](https://raw.githubusercontent.com/{})'
-                .format(alt, github_path))
+        return '![{}]({})'.format(alt, github_url)
 
 
 def md5(s):
@@ -66,17 +65,26 @@ def md5(s):
     return h.hexdigest()
 
 
-def process_image(line, github_root):
-    "Convert relative-path image links to absolute"
+def process_image(line):
+    """
+    New syntax: ![alt](image_url =200x150)
+    <width>x<height>
+    You can omit either width or height: `=200x` or `=x150`
+    """
     spans = []
     replacements = []
     for match in image_re.finditer(line):
-        alt, image_link = match.groups()
-        image_link = image_link.strip()
-        if image_link.startswith('/'):
-            github_path = github_root + image_link
-            spans.append(match.span())
-            replacements.append(gen_github_link(github_path, alt))
+        alt, image_url = match.groups()
+        image_url = image_url.strip().rsplit('=')
+        width, height = None, None
+        if len(image_url) == 2:
+            size_spec = image_url[1]
+            width, height = size_spec.split('x')
+        image_url = image_url[0].strip()
+        if image_url.startswith('www.'):
+            image_url = 'http://' + image_url
+        spans.append(match.span())
+        replacements.append(gen_github_link(image_url, alt, width, height))
     return replace_n(line, spans, replacements)
 
 
@@ -87,7 +95,7 @@ def get_height(png_file, display_math):
     return int(height / 3.0 * scale)
 
 
-def process_latex(line, display_math, github_root, image_folder=''):
+def process_latex(line, display_math, image_folder=''):
     if image_folder:
         image_folder += '/'
     spans = []
@@ -102,8 +110,7 @@ def process_latex(line, display_math, github_root, image_folder=''):
     for match in latex_re.finditer(line):
         spans.append(match.span())
         formula_with_dollar, formula = match.group(0), match.group(1)
-        png_file = image_folder + md5(formula_with_dollar) + '.png'
-        github_path = github_root + '/' + png_file
+        png_file = image_folder + 'tex_' + md5(formula_with_dollar) + '.png'
         if not png_file in latex_files: # avoid regeneration
             latex_files.add(png_file)
             tex2png(**{'formula': formula,
@@ -112,7 +119,7 @@ def process_latex(line, display_math, github_root, image_folder=''):
                        'dpi': 300})
             assert os.path.exists(png_file)
 
-        replacements.append(gen_github_link(github_path, formula, 
+        replacements.append(gen_github_link(png_file, formula, 
                                     height=get_height(png_file, display_math)))
     return replace_n(line, spans, replacements)
 
@@ -122,61 +129,19 @@ def process_dollar(line):
     return dollar_re.sub('$', line)
 
 
-def remove_ext(name):
-    return os.path.splitext(name)[0]
-
 def bash(cmd):
     return pc.check_output(cmd.split()).decode('utf-8').strip()
 
-def get_github_info(remote='origin'):
-    try:
-        git_remotes = bash('git remote -v')
-        git_current_branch = bash('git rev-parse --abbrev-ref HEAD')
-    except pc.CalledProcessError as exc:                                                                                                   
-        print('git ERROR!!!\n', 
-              '-'*50, '\n', 
-              exc.output.decode('utf-8'),
-              '-'*50) # exc.returncode
-        raise
 
-    git_remotes = git_remotes.split('\n')
-    for info in git_remotes:
-        # typically looks like:
-        # bakkdoor  https://github.com/bakkdoor/grit (fetch)
-        # bakkdoor  https://github.com/bakkdoor/grit (push)
-        # koke      git://github.com/koke/grit.git (fetch)
-        # koke      git://github.com/koke/grit.git (push)
-        # origin    git@github.com:mojombo/grit.git (fetch)
-        # origin    git@github.com:mojombo/grit.git (push)
-        info = info.strip().split()
-        assert len(info) == 3 and info[-1] in ['(fetch)', '(push)'], \
-            'bad git remote format {}'.format(info)
-        if info[0] == remote:
-            url = info[1]
-            # hardcoded parse
-            if url.startswith('git@'):
-                account, repo = url.split('/')
-                account = account.split(':')[-1]
-            else:
-                # take the last two items
-                *_, account, repo = url.split('/')
-            repo = remove_ext(repo)
-            return (account, repo, git_current_branch)
-    raise Exception('remote {} not found in the current git repo.'.format(remote))
-
-
-def translate(src_md, output_md, remote, image_folder):
-    github_root = '/'.join(get_github_info(remote))
-    print('Detected github root:', github_root)
-    
+def translate(src_md, output_md, image_folder):
     output_md = open(output_md, 'w')
     for line in open(src_md):
         # check for images first, replace relative paths that start with `/`
-        line = process_image(line, github_root)
+        line = process_image(line)
         # display math mode $$...$$
-        line = process_latex(line, True, github_root, image_folder)
+        line = process_latex(line, True, image_folder)
         # inline mode $...$
-        line = process_latex(line, False, github_root, image_folder)
+        line = process_latex(line, False, image_folder)
         # replace `\$` to literal `$`
         line = process_dollar(line)
         print(line, end='', file=output_md)
@@ -191,8 +156,6 @@ if __name__ == '__main__':
     parser.add_argument('-d', '--image-folder', default='',
                         help='Folder for the generated latex images, '
                         'must be RELATIVE PATH with respect to your github dir.')
-    parser.add_argument('-r', '--remote', default='origin',
-                        help='Github remote to push')
 
     args = parser.parse_args()
     folder = args.image_folder
