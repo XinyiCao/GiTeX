@@ -95,7 +95,7 @@ def get_height(png_file, display_math):
     return int(height / 3.0 * scale)
 
 
-def process_latex(line, display_math, image_folder=''):
+def process_latex(line, display_math, image_folder='', redraw=False):
     if image_folder:
         image_folder += '/'
     spans = []
@@ -113,10 +113,11 @@ def process_latex(line, display_math, image_folder=''):
         png_file = image_folder + 'tex_' + md5(formula_with_dollar) + '.png'
         if not png_file in latex_files: # avoid regeneration
             latex_files.add(png_file)
-            tex2png(**{'formula': formula,
-                       'output_file': png_file,
-                       'display_math': display_math,
-                       'dpi': 300})
+            if redraw or not os.path.exists(png_file):
+                tex2png(**{'formula': formula,
+                           'output_file': png_file,
+                           'display_math': display_math,
+                           'dpi': 300})
             assert os.path.exists(png_file)
 
         replacements.append(gen_github_link(png_file, formula, 
@@ -133,15 +134,15 @@ def bash(cmd):
     return pc.check_output(cmd.split()).decode('utf-8').strip()
 
 
-def translate(src_md, output_md, image_folder):
+def translate(src_md, output_md, image_folder, redraw):
     output_md = open(output_md, 'w')
     for line in open(src_md):
         # check for images first, replace relative paths that start with `/`
         line = process_image(line)
         # display math mode $$...$$
-        line = process_latex(line, True, image_folder)
+        line = process_latex(line, True, image_folder, redraw)
         # inline mode $...$
-        line = process_latex(line, False, image_folder)
+        line = process_latex(line, False, image_folder, redraw)
         # replace `\$` to literal `$`
         line = process_dollar(line)
         print(line, end='', file=output_md)
@@ -156,6 +157,8 @@ if __name__ == '__main__':
     parser.add_argument('-d', '--image-folder', default='',
                         help='Folder for the generated latex images, '
                         'must be RELATIVE PATH with respect to your github dir.')
+    parser.add_argument('-r', '--redraw', action='store_true',
+                        help='force all LaTeX formulas to redraw')
 
     args = parser.parse_args()
     folder = args.image_folder
