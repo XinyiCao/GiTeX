@@ -4,41 +4,44 @@ import argparse
 import tempfile
 import subprocess as pc
 
+class attrdict(dict):
+    __getattr__ = dict.__getitem__
+    __setattr__ = dict.__setitem__
+    __delattr__ = dict.__delitem__
 
-def get_binary(program, check=True):
+
+def get_binary(program, checkmsg=''):
     binary = shutil.which(program)
-    if check and not binary:
-        raise Exception('Required program {} not found'.format(program))
+    if checkmsg and not binary:
+        raise Exception('Required program {} not found. {}'
+                        .format(program, checkmsg))
     return binary
 
 
-def gen_latex_file(args, temp_dir):
+def gen_latex_file(temp_dir, formula, packages, display_math):
     # generate temporary latex file with the formula code
-    delimiter = '$$' if args.display_math else '$'
-    # comma separated
-    package_spec = r''
-    pkgs = args.packages.split(',')
-    for pkg in pkgs:
-        if not pkg: break
-        package_spec += r'\usepackage{{{}}}'.format(pkg)
+    delimiter = '$$' if display_math else '$'
+    packages = 'amsmath,amssymb,' + packages # ams pkgs will always be included
     with tempfile.NamedTemporaryFile(suffix='.tex', 
                                      delete=False,
                                      mode='w',
                                      dir=temp_dir) as temp_tex:
-        print(r"\documentclass[12pt]{{article}}{_packages}\pagestyle{{empty}}"
+        print(r"\documentclass[12pt]{{article}}"
+              r"\usepackage{{{_packages}}}\pagestyle{{empty}}"
               r"\begin{{document}}{_delimiter}"
               r"{_formula}"
               r"{_delimiter}\end{{document}}"
-              .format(_packages=package_spec, 
-                      _formula=args.formula,
+              .format(_packages=packages, 
+                      _formula=formula,
                       _delimiter=delimiter),
               end='', file=temp_tex)
+    # print(pc.check_output(['cat', temp_tex.name]))
     return temp_tex
 
 
-def run_latex(temp_tex, temp_dir):
+def run_latex(temp_dir, temp_tex):
     try:
-        pc.check_output([get_binary('latex'), 
+        pc.check_output(['latex',
                          '-halt-on-error', 
                          '-output-directory={}'.format(temp_dir), 
                          temp_tex.name])
@@ -49,20 +52,24 @@ def run_latex(temp_tex, temp_dir):
               exc.output.decode('utf-8'),
               '-'*50) # exc.returncode
         print('Clean up temp dir', temp_dir)
+        try:
+            print('TEX SOURCE:')
+            print(pc.check_output(['cat', temp_tex.name]).decode('utf-8'))
+        except: pass
         shutil.rmtree(temp_dir)
         raise
 
 
-def run_dvipng(args, temp_tex, temp_dir):
+def run_dvipng(temp_dir, temp_tex, output_file, dpi, foreground, backgroud):
     temp_dvi = os.path.splitext(temp_tex.name)[0] + '.dvi'
     assert os.path.exists(temp_dvi), \
         "LaTeX generated DVI file {} doesn't exist".format(temp_dvi)
     try:
-        pc.check_output([get_binary('dvipng'), 
-                         '-D', str(args.dpi),
-                         '-fg', args.foreground,
-                         '-bg', args.backgroud,
-                         '-o', args.output_file,
+        pc.check_output(['dvipng', 
+                         '-D', str(dpi),
+                         '-fg', foreground,
+                         '-bg', backgroud,
+                         '-o', output_file,
                          '-q', '--strict', '-T', 'tight',
                          temp_dvi])
     except pc.CalledProcessError as exc:                                                                                                   
@@ -75,18 +82,15 @@ def run_dvipng(args, temp_tex, temp_dir):
         raise
 
 
-def run_optipng(args):
-    if not args.optimize: 
-        return
-    assert os.path.exists(args.output_file), \
-        "Output png file {} doesn't exist".format(args.output_file)
+def run_optipng(output_file):
+    assert os.path.exists(output_file), \
+        "Output png file {} doesn't exist".format(output_file)
     try:
-        optipng = get_binary('optipng', check=False) 
+        optipng = get_binary('optipng') 
         if not optipng:
             print('optipng not found, skip optimization. ')
             return
-        pc.check_output([bin, '-zc1-9', '-zm1-9', '-zs0-3', '-f0-5', 
-                         args.output_file])
+        pc.check_output([bin, '-zc1-9', '-zm1-9', '-zs0-3', '-f0-5', output_file])
     except pc.CalledProcessError as exc:                                                                                                   
         print('optipng ERROR!!!\n', 
               '-'*50, '\n', 
@@ -94,6 +98,29 @@ def run_optipng(args):
               '-'*50) # exc.returncode
         raise
 
+
+def tex2png(formula,
+            output_file,
+            display_math=False,
+            dpi=300,
+            packages='',
+            foreground='Black',
+            backgroud='White',
+            optimize=False):
+    # check required binaries
+    get_binary('latex', 'Install MacTeX: http://www.tug.org/mactex/')
+    get_binary('dvipng', 'Install MacTeX: http://www.tug.org/mactex/')
+    
+    # make a temporary directory
+    temp_dir = tempfile.mkdtemp('gitex')
+    temp_tex = gen_latex_file(temp_dir, formula, packages, display_math)
+    run_latex(temp_dir, temp_tex)
+    run_dvipng(temp_dir, temp_tex, output_file, dpi, foreground, backgroud)
+    if optimize:
+        run_optipng(output_file)
+    # clean up
+    shutil.rmtree(temp_dir)
+    
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -103,8 +130,9 @@ if __name__ == '__main__':
                         help='LaTeX math display mode')
     parser.add_argument('-d', '--dpi', type=int, default=300,
                         help='Output resolution in DPI')
-    parser.add_argument('-p', '--packages', default='',
-                        help='Comma seperated list of LaTeX package names')
+    parser.add_argument('-p', '--packages', default='amsmath,amssymb',
+                        help='Comma seperated list of LaTeX package names additional to '
+                        'amsmath,amssymb, which are always included.')
     parser.add_argument('-fg', '--foreground', default='Black',
                         help='Set the foreground color')
     parser.add_argument('-bg', '--backgroud', default='White',
@@ -113,13 +141,4 @@ if __name__ == '__main__':
                         help='Optimize output image using `optipng`')
 
     args = parser.parse_args()
-    
-    # make a temporary directory
-    temp_dir = tempfile.mkdtemp('gitex')
-    print(temp_dir)
-    temp_tex = gen_latex_file(args, temp_dir)
-    run_latex(temp_tex, temp_dir)
-    run_dvipng(args, temp_tex, temp_dir)
-    run_optipng(args)
-    
-    shutil.rmtree(temp_dir)
+    tex2png(**vars(args))
