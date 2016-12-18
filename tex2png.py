@@ -26,6 +26,8 @@ def gen_latex_file(temp_dir, formula, packages, math_mode):
         delimiter = '$$'
     else:
         delimiter = '\n'
+    if '+' in packages:
+        packages.replace('+', ',')
     packages = 'amsmath,amssymb,' + packages # ams pkgs will always be included
     with tempfile.NamedTemporaryFile(suffix='.tex', 
                                      delete=False,
@@ -153,7 +155,7 @@ if __name__ == '__main__':
     parser.add_argument('-d', '--dpi', type=int, default=300,
                         help='Output resolution in DPI')
     parser.add_argument('-p', '--packages', default='amsmath,amssymb',
-                        help='Comma seperated list of LaTeX package names additional to '
+                        help='`,` or `+` seperated list of LaTeX package names additional to '
                         'amsmath,amssymb, which are always included.')
     parser.add_argument('-fg', '--foreground', default='rgb 0.0 0.0 0.0',
                         help='Set the foreground color')

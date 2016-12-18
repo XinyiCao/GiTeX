@@ -10,23 +10,31 @@ from imgsize import get_image_size
 # http://stackoverflow.com/questions/36391979/find-markdown-image-syntax-in-string-in-java
 # match Markdown image syntax ![alt](image_link)
 # group 1: `alt`; group 2 `image_link`
-image_re = re.compile(r'!\[([^\])]*)\]\(([^)]+)\)')
+image_re = re.compile(r'!\[([^\]]*)\]\(([^)]+)\)')
 
 # http://stackoverflow.com/questions/17767251/how-to-ignore-escaped-character-in-regex
 # negative lookahead: In general, (?<!Y)X matches an X that is not preceded by Y.
 # inline math: $ .... $ but \$ escapes dollar sign
 inline_re = re.compile(r'(?<!\\)\$([^\$]+)(?<!\\)\$')
+# extended: match $ ... $[optional_args]
+inline_re = re.compile(r'(?<!\\)\$([^\$]+)(?<!\\)\$(\[[^\]]*\])?')
+# non-standard regex support for named group
+inline_re = re.compile(r'(?<!\\)\$(?P<formula>[^\$]+)(?<!\\)\$(\[(?P<options>[^\]]*)\])?')
 
 # diplay mode math: $$ .... $$ but \$ escapes dollar sign
 display_re = re.compile(r'(?<!\\)\$\$([^\$]+)(?<!\\)\$\$')
+# extended; match $$ ... $$[optional_args]
+display_re = re.compile(r'(?<!\\)\$\$(?P<formula>[^\$]+)(?<!\\)\$\$(\[(?P<options>[^\]]*)\])?')
 
 # match \include[...] on its own line
-include_re = re.compile(r'[\s]*\\include\[([^\])]*)\][\s]*')
+include_re = re.compile(r'[\s]*\\include\[(?P<options>[^\]]*)\][\s]*')
 
 # match \begin[...] on its own line
 begin_re = re.compile(r'^[\s]*\\begin\[([^\])]*)\][\s]*$')
+# make [...] optional
+begin_re = re.compile(r'^[\s]*\\begin(\[(?P<options>[^\]]*)\])?[\s]*$')
 
-# match \end[...] on its own line
+# match \end on its own line
 end_re = re.compile(r'^[\s]*\\end[\s]*$')
 
 # `\\` escape to match literals
@@ -38,6 +46,10 @@ escape_re = [
     (r'\\include', r'\\\\include')
 ]
 escape_re = [(literal, re.compile(regex)) for literal, regex in escape_re]
+
+
+def bash(cmd):
+    return pc.check_output(cmd.split()).decode('utf-8').strip()
 
 
 def replace(s, span, replacement):
@@ -142,6 +154,17 @@ def run_latex(image_folder, formula, math_mode, redraw, **kwargs):
     return png_file, img_code
 
 
+def parse_options(options_str):
+    if not options_str:
+        return {}
+    try:
+        return dict(map(str.strip, arg.split('='))
+                    for arg in options_str.split(',') if '=' in arg)
+    except:
+        print('arg string format error:', options_str)
+        raise
+
+
 def process_latex(line, math_mode, image_folder, redraw):
     spans = []
     replacements = []
@@ -153,8 +176,9 @@ def process_latex(line, math_mode, image_folder, redraw):
     
     for match in latex_re.finditer(line):
         spans.append(match.span())
-        formula = match.group(1)
-        png_file, img_code = run_latex(image_folder, formula, math_mode, redraw)
+        formula, options = match.group('formula', 'options')
+        options = parse_options(options)
+        png_file, img_code = run_latex(image_folder, formula, math_mode, redraw, **options)
         replacements.append(img_code)
     return replace_n(line, spans, replacements)
 
@@ -164,19 +188,6 @@ def process_escapes(line):
     for literal, regex in escape_re:
         line = regex.sub(literal, line)
     return line
-
-
-def bash(cmd):
-    return pc.check_output(cmd.split()).decode('utf-8').strip()
-
-
-def parse_kwarg(kwarg_str):
-    try:
-        return dict(map(str.strip, arg.split('='))
-                    for arg in kwarg_str.split(',') if '=' in arg)
-    except:
-        print('arg string format error:', kwarg_str)
-        raise
 
 
 def translate(src_md, output_md, image_folder, redraw):
@@ -190,8 +201,8 @@ def translate(src_md, output_md, image_folder, redraw):
         begin_stmt = begin_re.match(line)
         if begin_stmt:
             # extra configs to tex2png()
-            args = begin_stmt.group(1)
-            args = parse_kwarg(args)
+            options = begin_stmt.group('options')
+            options = parse_options(options)
             formula = ''
             while line:
                 line = src.readline()
@@ -203,27 +214,27 @@ def translate(src_md, output_md, image_folder, redraw):
                 raise Exception(r'\begin[] statement has no \end')
             if formula:
                 # user can override math mode, defaults to `none`
-                math_mode = args.pop('math_mode') if 'math_mode' in args else 'none'
-                png_file, img_code = run_latex(image_folder, formula, math_mode, redraw, **args)
+                math_mode = options.pop('math_mode') if 'math_mode' in options else 'none'
+                png_file, img_code = run_latex(image_folder, formula, math_mode, redraw, **options)
                 print(img_code, end='', file=output_md)
             # skip the rest of processing
             continue
         
         include_stmt = include_re.match(line)
         if include_stmt:
-            args = include_stmt.group(1)
+            options = include_stmt.group('options')
             # \include[file_path, arg1=xx, arg2=...]
-            if ',' in args:
-                latex_src, args = args.split(',', 1)
+            if ',' in options:
+                latex_src, options = options.split(',', 1)
             else:
-                latex_src, args = args, ''
+                latex_src, options = options, ''
             assert os.path.exists(latex_src), \
                 '\\include {} source file not found.'.format(latex_src)
             formula = open(latex_src).read()
-            args = parse_kwarg(args)
-            # print(formula, args)
-            math_mode = args.pop('math_mode') if 'math_mode' in args else 'none'
-            png_file, img_code = run_latex(image_folder, formula, math_mode, redraw, **args)
+            options = parse_options(options)
+            # print(formula, options)
+            math_mode = options.pop('math_mode') if 'math_mode' in options else 'none'
+            png_file, img_code = run_latex(image_folder, formula, math_mode, redraw, **options)
             print(img_code, end='', file=output_md)
             continue
         
