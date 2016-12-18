@@ -3,6 +3,7 @@ import shutil
 import argparse
 import tempfile
 import subprocess as pc
+from colors import CSS3_COLOR_RGB
 
 class attrdict(dict):
     __getattr__ = dict.__getitem__
@@ -109,10 +110,17 @@ def run_optipng(output_file):
 
 
 def rgb_arg(rgb_str):
-    # must convert to rgb <float 0.0-1.0>*3
-    rgbs = rgb_str.strip().split()
-    assert len(rgbs) == 4, 'rgb value string must be: rgb <R> <G> <B>'
-    if all(map(str.isdigit, rgbs[1:])): # all int values
+    if rgb_str in CSS3_COLOR_RGB:
+        # color name in CSS3, e.g. `darksalmon`
+        rgbs = ('rgb',) + CSS3_COLOR_RGB[rgb_str]
+        needs_convert = True
+    else:
+        # must convert to rgb <float 0.0-1.0>*3
+        rgbs = rgb_str.strip().split()
+        assert len(rgbs) == 4, 'rgb value string must be: rgb <R> <G> <B>'
+        needs_convert = all(map(str.isdigit, rgbs[1:])) # all int values
+    
+    if needs_convert:
         # convert to 256 scale
         rgb_values = [float(x) / 255.0 for x in rgbs[1:]]
         return '{} {:.4f} {:.4f} {:.4f}'.format(rgbs[0], *rgb_values)
@@ -157,9 +165,9 @@ if __name__ == '__main__':
                         help='`,` or `+` seperated list of LaTeX package names additional to '
                         'amsmath,amssymb, which are always included.')
     parser.add_argument('-fg', '--foreground', default='rgb 0.0 0.0 0.0',
-                        help='Set the foreground color')
+                    help='Set the foreground color (rgb or CSS3 color name, e.g. `gold`)')
     parser.add_argument('-bg', '--background', default='rgb 1.0 1.0 1.0',
-                        help='Set the backgroud color')
+                    help='Set the background color (rgb or CSS3 color name, e.g. `deepskyblue`)')
     parser.add_argument('-O', '--optimize', action='store_true',
                         help='Optimize output image using `optipng`')
 
