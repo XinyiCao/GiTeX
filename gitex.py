@@ -15,10 +15,19 @@ image_re = re.compile(r'!\[([^\])]*)\]\(([^)]+)\)')
 # http://stackoverflow.com/questions/17767251/how-to-ignore-escaped-character-in-regex
 # negative lookahead: In general, (?<!Y)X matches an X that is not preceded by Y.
 # inline math: $ .... $ but \$ escapes dollar sign
-single_re = re.compile(r'(?<!\\)\$([^\$]+)(?<!\\)\$')
+inline_re = re.compile(r'(?<!\\)\$([^\$]+)(?<!\\)\$')
 
 # diplay mode math: $$ .... $$ but \$ escapes dollar sign
-double_re = re.compile(r'(?<!\\)\$\$([^\$]+)(?<!\\)\$\$')
+display_re = re.compile(r'(?<!\\)\$\$([^\$]+)(?<!\\)\$\$')
+
+# match \include[...] on its own line
+include_re = re.compile(r'[\s]*\\include\[([^\])]*)\][\s]*')
+
+# match \begin[...] on its own line
+begin_re = re.compile(r'^[\s]*\\begin\[([^\])]*)\][\s]*$')
+
+# match \end[...] on its own line
+end_re = re.compile(r'^[\s]*\\end[\s]*$')
 
 # match literal dollar
 dollar_re = re.compile(r'\\\$')
@@ -42,13 +51,15 @@ def replace_n(s, spans, replacements):
     return new_s + replacements[-1] + s[spans[-1][1]:]
     
     
-def gen_github_link(github_url, alt, width=None, height=None):
+def gen_img_code(github_url, alt, width=None, height=None):
     """
     Generate image markdown code with absolute URL link <deprecated>
     <img src="https://raw.githubusercontent.com/LinxiFan/temp/master/d500.png" 
     height="20" />
     github_path: <username>/<repo>/<branch>/<folders>/<filename>
     """
+    # remove all new lines in `alt` text
+    alt = alt.replace('\n', ' ')
     if height or width:
         width = 'width="{}"'.format(width) if width else ''
         height = 'height="{}"'.format(height) if height else ''
@@ -84,44 +95,60 @@ def process_image(line):
         if image_url.startswith('www.'):
             image_url = 'http://' + image_url
         spans.append(match.span())
-        replacements.append(gen_github_link(image_url, alt, width, height))
+        replacements.append(gen_img_code(image_url, alt, width, height))
     return replace_n(line, spans, replacements)
 
 
-def get_height(png_file, display_math):
+def get_height(png_file, math_mode):
     # inline image needs to be resized for better github rendering
     _, height = get_image_size(png_file)
-    scale = 1.2 if display_math else 1.0
+    if math_mode == 'display':
+        scale = 1.2
+    elif math_mode == 'inline':
+        scale = 1.0
+    else:
+        scale = 1.1
     return int(height / 3.0 * scale)
 
 
-def process_latex(line, display_math, image_folder='', redraw=False):
-    if image_folder:
-        image_folder += '/'
+def run_latex(image_folder, formula, math_mode, redraw, **kwargs):
+    width, height = None, None
+    if 'width' in kwargs:
+        width = kwargs.pop('width')
+    if 'height' in kwargs:
+        height = kwargs.pop('height')
+    
+    # differentiate display/inline math mode hash, and different config's hash
+    md5hash = md5(formula + ('$' if math_mode=='display' else ' ') + str(kwargs))
+    png_file = os.path.join(image_folder, 'tex_' + md5hash + '.png')
+    kwargs.update({'formula': formula,
+                   'output_file': png_file,
+                   'math_mode': math_mode})
+    if redraw or not os.path.exists(png_file):
+        tex2png(**kwargs)
+    assert os.path.exists(png_file), \
+        'formula `{}` latex generation failure: {}'.format(formula, png_file)
+    
+    img_code = gen_img_code(png_file, formula, 
+                            width=width,
+                            height=height if height else get_height(png_file, math_mode))
+    return png_file, img_code
+
+
+def process_latex(line, math_mode, image_folder, redraw):
     spans = []
     replacements = []
-    latex_files = set() # {latex-images-to-be-generated}
     
-    if display_math:
-        latex_re = double_re
-    else:
-        latex_re = single_re
+    if math_mode == 'display':
+        latex_re = display_re
+    elif math_mode == 'inline':
+        latex_re = inline_re
     
     for match in latex_re.finditer(line):
         spans.append(match.span())
-        formula_with_dollar, formula = match.group(0), match.group(1)
-        png_file = image_folder + 'tex_' + md5(formula_with_dollar) + '.png'
-        if not png_file in latex_files: # avoid regeneration
-            latex_files.add(png_file)
-            if redraw or not os.path.exists(png_file):
-                tex2png(**{'formula': formula,
-                           'output_file': png_file,
-                           'display_math': display_math,
-                           'dpi': 300})
-            assert os.path.exists(png_file)
-
-        replacements.append(gen_github_link(png_file, formula, 
-                                    height=get_height(png_file, display_math)))
+        formula = match.group(1)
+        png_file, img_code = run_latex(image_folder, formula, math_mode, redraw)
+        replacements.append(img_code)
     return replace_n(line, spans, replacements)
 
 
@@ -134,18 +161,74 @@ def bash(cmd):
     return pc.check_output(cmd.split()).decode('utf-8').strip()
 
 
+def parse_kwarg(kwarg_str):
+    try:
+        return dict(map(str.strip, arg.split('='))
+                    for arg in kwarg_str.split(',') if '=' in arg)
+    except:
+        print('arg string format error:', kwarg_str)
+        raise
+
+
 def translate(src_md, output_md, image_folder, redraw):
     output_md = open(output_md, 'w')
-    for line in open(src_md):
-        # check for images first, replace relative paths that start with `/`
+    src = open(src_md)
+    line = 'none'
+    
+    while line:
+        line = src.readline()
+        # \begin \end syntax
+        begin_stmt = begin_re.match(line)
+        if begin_stmt:
+            # extra configs to tex2png()
+            args = begin_stmt.group(1)
+            args = parse_kwarg(args)
+            formula = ''
+            while line:
+                line = src.readline()
+                if end_re.match(line):
+                    break
+                else:
+                    formula += line
+            if not line:
+                raise Exception(r'\begin[] statement has no \end')
+            if formula:
+                # user can override math mode, defaults to `none`
+                math_mode = args.pop('math_mode') if 'math_mode' in args else 'none'
+                png_file, img_code = run_latex(image_folder, formula, math_mode, redraw, **args)
+                print(img_code, end='', file=output_md)
+            # skip the rest of processing
+            continue
+        
+        include_stmt = include_re.match(line)
+        if include_stmt:
+            args = include_stmt.group(1)
+            # \include[file_path, arg1=xx, arg2=...]
+            if ',' in args:
+                latex_src, args = args.split(',', 1)
+            else:
+                latex_src, args = args, ''
+            assert os.path.exists(latex_src), \
+                '\\include {} source file not found.'.format(latex_src)
+            formula = open(latex_src).read()
+            args = parse_kwarg(args)
+            # print(formula, args)
+            math_mode = args.pop('math_mode') if 'math_mode' in args else 'none'
+            png_file, img_code = run_latex(image_folder, formula, math_mode, redraw, **args)
+            print(img_code, end='', file=output_md)
+            continue
+        
+        # check for images to implement the new resize syntax
         line = process_image(line)
         # display math mode $$...$$
-        line = process_latex(line, True, image_folder, redraw)
+        line = process_latex(line, 'display', image_folder, redraw)
         # inline mode $...$
-        line = process_latex(line, False, image_folder, redraw)
+        line = process_latex(line, 'inline', image_folder, redraw)
         # replace `\$` to literal `$`
         line = process_dollar(line)
         print(line, end='', file=output_md)
+
+    src.close()
     output_md.close()
 
 
