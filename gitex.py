@@ -29,8 +29,15 @@ begin_re = re.compile(r'^[\s]*\\begin\[([^\])]*)\][\s]*$')
 # match \end[...] on its own line
 end_re = re.compile(r'^[\s]*\\end[\s]*$')
 
-# match literal dollar
-dollar_re = re.compile(r'\\\$')
+# `\\` escape to match literals
+escape_re = [
+    # ('$$', r'\\\$\$'),
+    ('$', r'\\\$'),
+    (r'\\end', r'\\\\end'),
+    (r'\\begin', r'\\\\begin'),
+    (r'\\include', r'\\\\include')
+]
+escape_re = [(literal, re.compile(regex)) for literal, regex in escape_re]
 
 
 def replace(s, span, replacement):
@@ -152,9 +159,11 @@ def process_latex(line, math_mode, image_folder, redraw):
     return replace_n(line, spans, replacements)
 
 
-def process_dollar(line):
+def process_escapes(line):
     # escaped `\$` will be translated to a dollar sign literal
-    return dollar_re.sub('$', line)
+    for literal, regex in escape_re:
+        line = regex.sub(literal, line)
+    return line
 
 
 def bash(cmd):
@@ -224,8 +233,8 @@ def translate(src_md, output_md, image_folder, redraw):
         line = process_latex(line, 'display', image_folder, redraw)
         # inline mode $...$
         line = process_latex(line, 'inline', image_folder, redraw)
-        # replace `\$` to literal `$`
-        line = process_dollar(line)
+        # replace escapes (e.g. \$ \\include) to literals
+        line = process_escapes(line)
         print(line, end='', file=output_md)
 
     src.close()
