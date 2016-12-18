@@ -26,8 +26,7 @@ def gen_latex_file(temp_dir, formula, packages, math_mode):
         delimiter = '$$'
     else:
         delimiter = '\n'
-    if '+' in packages:
-        packages.replace('+', ',')
+    packages = packages.replace('+', ',') # alternative `+` separated list
     packages = 'amsmath,amssymb,' + packages # ams pkgs will always be included
     with tempfile.NamedTemporaryFile(suffix='.tex', 
                                      delete=False,
