@@ -137,22 +137,22 @@ def get_height(png_file, dpi, math_mode):
     return int(height / shrink * scale)
 
 
-def run_latex(image_folder, formula, math_mode, **kwargs):
+def run_latex(formula, math_mode, **options):
+    image_folder = options.pop('image_folder')
+    redraw = options.pop('redraw')
     width, height = None, None
-    if 'width' in kwargs:
-        width = kwargs.pop('width')
-    if 'height' in kwargs:
-        height = kwargs.pop('height')
-    redraw = kwargs.pop('redraw')
+    if 'width' in options:
+        width = options.pop('width')
+    if 'height' in options:
+        height = options.pop('height')
     
     # differentiate display/inline math mode hash, and different config's hash
     md5hash = md5(formula + ('$' if math_mode=='display' else ' ') 
-                  + str(sorted(kwargs.items())))
+                  + str(sorted(options.items())))
     png_file = os.path.join(image_folder, 'tex_' + md5hash + '.png')
-    options = {'formula': formula,
-               'output_file': png_file,
-               'math_mode': math_mode}
-    options.update(kwargs)
+    options = merge_dict({'formula': formula,
+                          'output_file': png_file,
+                          'math_mode': math_mode}, options)
     if redraw or not os.path.exists(png_file):
         tex2png(**options)
     assert os.path.exists(png_file), \
@@ -176,7 +176,7 @@ def parse_options(options_str):
         raise
 
 
-def process_latex(line, math_mode, image_folder, **cmdline_options):
+def process_latex(line, math_mode, **tex2png_options):
     spans = []
     replacements = []
     
@@ -189,8 +189,8 @@ def process_latex(line, math_mode, image_folder, **cmdline_options):
         spans.append(match.span())
         formula, options = match.group('formula', 'options')
         options = parse_options(options)
-        options = merge_dict(cmdline_options, options)
-        png_file, img_code = run_latex(image_folder, formula, math_mode, **options)
+        options = merge_dict(tex2png_options, options)
+        png_file, img_code = run_latex(formula, math_mode, **options)
         replacements.append(img_code)
     return replace_n(line, spans, replacements)
 
@@ -202,7 +202,7 @@ def process_escapes(line):
     return line
 
 
-def translate(src_md, output_md, image_folder, **cmdline_options):
+def translate(src_md, output_md, **tex2png_options):
     output_md = open(output_md, 'w')
     src = open(src_md)
     line = 'none'
@@ -227,8 +227,8 @@ def translate(src_md, output_md, image_folder, **cmdline_options):
             if formula:
                 # user can override math mode, defaults to `none`
                 math_mode = options.pop('math_mode') if 'math_mode' in options else 'none'
-                options = merge_dict(cmdline_options, options)
-                png_file, img_code = run_latex(image_folder, formula, math_mode, **options)
+                options = merge_dict(tex2png_options, options)
+                png_file, img_code = run_latex(formula, math_mode, **options)
                 print(img_code, end='', file=output_md)
             # skip the rest of processing
             continue
@@ -247,17 +247,17 @@ def translate(src_md, output_md, image_folder, **cmdline_options):
             options = parse_options(options)
             # print(formula, options)
             math_mode = options.pop('math_mode') if 'math_mode' in options else 'none'
-            options = merge_dict(cmdline_options, options)
-            png_file, img_code = run_latex(image_folder, formula, math_mode, **options)
+            options = merge_dict(tex2png_options, options)
+            png_file, img_code = run_latex(formula, math_mode, **options)
             print(img_code, end='', file=output_md)
             continue
         
         # check for images to implement the new resize syntax
         line = process_image(line)
         # display math mode $$...$$
-        line = process_latex(line, 'display', image_folder, **cmdline_options)
+        line = process_latex(line, 'display', **tex2png_options)
         # inline mode $...$
-        line = process_latex(line, 'inline', image_folder, **cmdline_options)
+        line = process_latex(line, 'inline', **tex2png_options)
         # replace escapes (e.g. \$ \\include) to literals
         line = process_escapes(line)
         print(line, end='', file=output_md)
