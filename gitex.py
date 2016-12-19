@@ -2,7 +2,6 @@ import os
 import re
 import hashlib
 import argparse
-import shutil
 import subprocess as pc
 from tex2png import tex2png
 from imgsize import get_image_size
@@ -50,6 +49,12 @@ escape_re = [(literal, re.compile(regex)) for literal, regex in escape_re]
 
 def bash(cmd):
     return pc.check_output(cmd.split()).decode('utf-8').strip()
+
+
+def merge_dict(d1, d2):
+    dm = d1.copy()
+    dm.update(d2)
+    return dm
 
 
 def replace(s, span, replacement):
@@ -118,7 +123,8 @@ def process_image(line):
     return replace_n(line, spans, replacements)
 
 
-def get_height(png_file, math_mode):
+def get_height(png_file, dpi, math_mode):
+    dpi = int(dpi)
     # inline image needs to be resized for better github rendering
     _, height = get_image_size(png_file)
     if math_mode == 'display':
@@ -127,30 +133,35 @@ def get_height(png_file, math_mode):
         scale = 1.0
     else:
         scale = 1.1
-    return int(height / 3.0 * scale)
+    shrink = dpi / 100.
+    return int(height / shrink * scale)
 
 
-def run_latex(image_folder, formula, math_mode, redraw, **kwargs):
+def run_latex(image_folder, formula, math_mode, **kwargs):
     width, height = None, None
     if 'width' in kwargs:
         width = kwargs.pop('width')
     if 'height' in kwargs:
         height = kwargs.pop('height')
+    redraw = kwargs.pop('redraw')
     
     # differentiate display/inline math mode hash, and different config's hash
-    md5hash = md5(formula + ('$' if math_mode=='display' else ' ') + str(kwargs))
+    md5hash = md5(formula + ('$' if math_mode=='display' else ' ') 
+                  + str(sorted(kwargs.items())))
     png_file = os.path.join(image_folder, 'tex_' + md5hash + '.png')
-    kwargs.update({'formula': formula,
-                   'output_file': png_file,
-                   'math_mode': math_mode})
+    options = {'formula': formula,
+               'output_file': png_file,
+               'math_mode': math_mode}
+    options.update(kwargs)
     if redraw or not os.path.exists(png_file):
-        tex2png(**kwargs)
+        tex2png(**options)
     assert os.path.exists(png_file), \
         'formula `{}` latex generation failure: {}'.format(formula, png_file)
     
     img_code = gen_img_code(png_file, formula, 
                             width=width,
-                            height=height if height else get_height(png_file, math_mode))
+                            height=height if height 
+                                else get_height(png_file, options['dpi'], math_mode))
     return png_file, img_code
 
 
@@ -165,7 +176,7 @@ def parse_options(options_str):
         raise
 
 
-def process_latex(line, math_mode, image_folder, redraw):
+def process_latex(line, math_mode, image_folder, **cmdline_options):
     spans = []
     replacements = []
     
@@ -178,7 +189,8 @@ def process_latex(line, math_mode, image_folder, redraw):
         spans.append(match.span())
         formula, options = match.group('formula', 'options')
         options = parse_options(options)
-        png_file, img_code = run_latex(image_folder, formula, math_mode, redraw, **options)
+        options = merge_dict(cmdline_options, options)
+        png_file, img_code = run_latex(image_folder, formula, math_mode, **options)
         replacements.append(img_code)
     return replace_n(line, spans, replacements)
 
@@ -190,7 +202,7 @@ def process_escapes(line):
     return line
 
 
-def translate(src_md, output_md, image_folder, redraw):
+def translate(src_md, output_md, image_folder, **cmdline_options):
     output_md = open(output_md, 'w')
     src = open(src_md)
     line = 'none'
@@ -215,7 +227,8 @@ def translate(src_md, output_md, image_folder, redraw):
             if formula:
                 # user can override math mode, defaults to `none`
                 math_mode = options.pop('math_mode') if 'math_mode' in options else 'none'
-                png_file, img_code = run_latex(image_folder, formula, math_mode, redraw, **options)
+                options = merge_dict(cmdline_options, options)
+                png_file, img_code = run_latex(image_folder, formula, math_mode, **options)
                 print(img_code, end='', file=output_md)
             # skip the rest of processing
             continue
@@ -234,16 +247,17 @@ def translate(src_md, output_md, image_folder, redraw):
             options = parse_options(options)
             # print(formula, options)
             math_mode = options.pop('math_mode') if 'math_mode' in options else 'none'
-            png_file, img_code = run_latex(image_folder, formula, math_mode, redraw, **options)
+            options = merge_dict(cmdline_options, options)
+            png_file, img_code = run_latex(image_folder, formula, math_mode, **options)
             print(img_code, end='', file=output_md)
             continue
         
         # check for images to implement the new resize syntax
         line = process_image(line)
         # display math mode $$...$$
-        line = process_latex(line, 'display', image_folder, redraw)
+        line = process_latex(line, 'display', image_folder, **cmdline_options)
         # inline mode $...$
-        line = process_latex(line, 'inline', image_folder, redraw)
+        line = process_latex(line, 'inline', image_folder, **cmdline_options)
         # replace escapes (e.g. \$ \\include) to literals
         line = process_escapes(line)
         print(line, end='', file=output_md)
@@ -257,11 +271,13 @@ if __name__ == '__main__':
     parser.add_argument('src_md', help='Source markdown file')
     parser.add_argument('output_md', help='Output markdown file')
 
-    parser.add_argument('-d', '--image-folder', default='',
+    parser.add_argument('-i', '--image-folder', default='',
                         help='Folder for the generated latex images, '
                         'must be RELATIVE PATH with respect to your github dir.')
     parser.add_argument('-r', '--redraw', action='store_true',
                         help='force all LaTeX formulas to redraw')
+    parser.add_argument('-d', '--dpi', type=int, default=200,
+                        help='default global DPI for generated images')
 
     args = parser.parse_args()
     folder = args.image_folder
