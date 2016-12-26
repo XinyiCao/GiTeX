@@ -107,6 +107,7 @@ def process_image(line):
     New syntax: ![alt](image_url =200x150)
     <width>x<height>
     You can omit either width or height: `=200x` or `=x150`
+    Or specify a percentage `=50%x30%`
     """
     spans = []
     replacements = []
@@ -132,9 +133,9 @@ def get_height(png_file, dpi, math_mode):
     if math_mode == 'display':
         scale = 1.2
     elif math_mode == 'inline':
-        scale = 1.0
-    else:
         scale = 1.1
+    else:
+        scale = 1.2
     shrink = dpi / 100.
     return int(height / shrink * scale)
 
