@@ -1,4 +1,7 @@
-# http://webcolors.readthedocs.io/en/1.7/
+"""
+@author: jimfan
+http://webcolors.readthedocs.io/en/1.7/
+"""
 
 CSS3_COLOR_RGB = {
     'aliceblue': (240, 248, 255),

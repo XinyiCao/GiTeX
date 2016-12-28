@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-
+"""
+@author: jimfan
+"""
 import os
 import shutil
 import argparse
 import tempfile
 import subprocess as pc
-from colors import CSS3_COLOR_RGB
+from gitex.colors import CSS3_COLOR_RGB
+
 
 class attrdict(dict):
     __getattr__ = dict.__getitem__
@@ -155,8 +158,8 @@ def tex2png(formula,
     shutil.rmtree(temp_dir)
     
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
+def main():
+    parser = argparse.ArgumentParser(prog='tex2png')
     parser.add_argument('formula', help='LaTeX formula text')
     parser.add_argument('output_file', help='output png file')
     parser.add_argument('-m', '--math-mode', default='inline',
@@ -175,3 +178,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     tex2png(**vars(args))
+
+
+if __name__ == '__main__':
+    main()

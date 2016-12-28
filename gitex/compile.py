@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-
+"""
+@author: jimfan
+"""
 import os
 import re
 import hashlib
 import argparse
 import subprocess as pc
-from tex2png import tex2png
-from imgsize import get_image_size
+from gitex.tex2png import tex2png
+from gitex.imgsize import get_image_size
 
 # http://stackoverflow.com/questions/36391979/find-markdown-image-syntax-in-string-in-java
 # match Markdown image syntax ![alt](image_link)
@@ -205,7 +207,7 @@ def process_escapes(line):
     return line
 
 
-def translate(src_md, output_md, **tex2png_options):
+def compile(src_md, output_md, **tex2png_options):
     output_md = open(output_md, 'w')
     src = open(src_md)
     line = 'none'
@@ -269,8 +271,8 @@ def translate(src_md, output_md, **tex2png_options):
     output_md.close()
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
+def main():
+    parser = argparse.ArgumentParser(prog='GiTeX')
     parser.add_argument('src_md', help='Source markdown file')
     parser.add_argument('output_md', help='Output markdown file')
 
@@ -288,4 +290,8 @@ if __name__ == '__main__':
         os.mkdir(folder)
         print('Created new folder for generated latex images: {}'.format(folder))
     
-    translate(**vars(args))
+    compile(**vars(args))
+
+
+if __name__ == '__main__':
+    main()
