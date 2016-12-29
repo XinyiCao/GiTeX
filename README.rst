@@ -3,6 +3,8 @@ GiTeX
 
 Generate LaTeX for Github markdown files.
 
+|Python version| |Github release| |PyPI version| |PyPI status|
+
 Dependency
 ----------
 
@@ -27,8 +29,8 @@ Installation
 
 ``pip install gitex``
 
-The installation includes both ``gitex`` library and two command line
-executables. Note that GiTeX requires python3.
+The installation includes both the ``gitex`` python3 library and two
+command line executables.
 
 Usage
 -----
@@ -94,3 +96,9 @@ Python3 library
 
     from gitex import tex2png # function API for `tex2png` command line script 
     from gitex import compile # function API for `gitex` command line script
+
+.. |Python version| image:: https://img.shields.io/pypi/pyversions/GiTeX.svg
+.. |Github release| image:: https://img.shields.io/github/release/LinxiFan/GiTeX.svg
+.. |PyPI version| image:: https://img.shields.io/pypi/v/gitex.svg
+.. |PyPI status| image:: https://img.shields.io/pypi/status/GiTeX.svg
+
