@@ -1,5 +1,7 @@
 # GiTeX
 
+Xinyi's modification.
+
 Generate LaTeX for Github markdown files. 
 
 ![Python version](https://img.shields.io/pypi/pyversions/GiTeX.svg)
